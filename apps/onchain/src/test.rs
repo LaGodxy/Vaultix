@@ -1,11 +1,13 @@
 use super::*;
-use soroban_sdk::{Address, Env, testutils::Address as _, token, vec};
+use soroban_sdk::{
+    testutils::{Address as _, Events},
+    token, vec, Address, Env, IntoVal,
+};
 
 /// Helper function to create and initialize a test token
 /// Returns admin client for minting and the token address
 fn create_test_token<'a>(env: &Env, admin: &Address) -> (token::StellarAssetClient<'a>, Address) {
-    let token_contract = env.register_stellar_asset_contract_v2(admin.clone());
-    let token_address = token_contract.address(); // Get the address from the contract
+    let token_address = env.register_stellar_asset_contract(admin.clone());
     let token_admin_client = token::StellarAssetClient::new(env, &token_address);
     (token_admin_client, token_address)
 }
@@ -25,7 +27,7 @@ fn test_create_and_get_escrow() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let depositor = Address::generate(&env);
@@ -75,6 +77,24 @@ fn test_create_and_get_escrow() {
     assert_eq!(escrow.total_released, 0);
     assert_eq!(escrow.status, EscrowStatus::Created);
     assert_eq!(escrow.milestones.len(), 3);
+
+    // Verify Create Event
+    let events = env.events().all();
+    let event = events.last().unwrap();
+    assert_eq!(event.0, contract_id);
+    assert_eq!(
+        event.1,
+        (
+            symbol_short!("create"),
+            escrow_id,
+            depositor.clone(),
+            recipient.clone()
+        )
+            .into_val(&env)
+    );
+    let total_amount: i128 = event.2.into_val(&env);
+    assert_eq!(total_amount, 10000);
+
     assert_eq!(escrow.deadline, deadline);
 
     assert_eq!(token_client.balance(&depositor), 10000);
@@ -87,7 +107,7 @@ fn test_deposit_funds() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let depositor = Address::generate(&env);
@@ -136,6 +156,7 @@ fn test_deposit_funds() {
     assert_eq!(escrow.status, EscrowStatus::Active);
 
     // Verify tokens were transferred to contract
+    // Assert balance is 10_000
     assert_eq!(token_client.balance(&depositor), 10_000);
     assert_eq!(token_client.balance(&contract_id), 10_000);
 }
@@ -145,7 +166,7 @@ fn test_release_milestone_with_tokens() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let depositor = Address::generate(&env);
@@ -221,7 +242,7 @@ fn test_dispute_blocks_release() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let depositor = Address::generate(&env);
@@ -266,7 +287,7 @@ fn test_complete_escrow_with_all_releases() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let depositor = Address::generate(&env);
@@ -324,7 +345,7 @@ fn test_cancel_escrow_with_refund() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let depositor = Address::generate(&env);
@@ -377,7 +398,7 @@ fn test_cancel_unfunded_escrow() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let depositor = Address::generate(&env);
@@ -418,7 +439,7 @@ fn test_admin_resolves_dispute_to_recipient() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
@@ -465,12 +486,10 @@ fn test_admin_resolves_dispute_to_recipient() {
     assert_eq!(escrow.status, EscrowStatus::Resolved);
     assert_eq!(escrow.resolution, Resolution::Recipient);
     assert_eq!(escrow.total_released, escrow.total_amount);
-    assert!(
-        escrow
-            .milestones
-            .iter()
-            .all(|m| m.status == MilestoneStatus::Released)
-    );
+    assert!(escrow
+        .milestones
+        .iter()
+        .all(|m| m.status == MilestoneStatus::Released));
 
     assert_eq!(token_client.balance(&recipient), 10000);
     assert_eq!(token_client.balance(&contract_id), 0);
@@ -482,7 +501,7 @@ fn test_admin_resolves_dispute_to_depositor() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
@@ -529,12 +548,10 @@ fn test_admin_resolves_dispute_to_depositor() {
     assert_eq!(escrow.status, EscrowStatus::Resolved);
     assert_eq!(escrow.resolution, Resolution::Depositor);
     assert_eq!(escrow.total_released, 0);
-    assert!(
-        escrow
-            .milestones
-            .iter()
-            .all(|m| m.status == MilestoneStatus::Disputed)
-    );
+    assert!(escrow
+        .milestones
+        .iter()
+        .all(|m| m.status == MilestoneStatus::Disputed));
 
     assert_eq!(token_client.balance(&depositor), 5000);
     assert_eq!(token_client.balance(&contract_id), 0);
@@ -547,7 +564,7 @@ fn test_duplicate_escrow_id() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let depositor = Address::generate(&env);
@@ -590,7 +607,7 @@ fn test_double_release() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     // Initialize treasury
@@ -639,7 +656,7 @@ fn test_too_many_milestones() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let depositor = Address::generate(&env);
@@ -675,7 +692,7 @@ fn test_invalid_milestone_amount() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let depositor = Address::generate(&env);
@@ -711,7 +728,7 @@ fn test_unauthorized_confirm_delivery() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let buyer = Address::generate(&env);
@@ -753,7 +770,7 @@ fn test_double_confirm_delivery() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let buyer = Address::generate(&env);
@@ -794,7 +811,7 @@ fn test_double_confirm_delivery() {
 fn test_zero_amount_milestone_rejected() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let depositor = Address::generate(&env);
@@ -830,7 +847,7 @@ fn test_zero_amount_milestone_rejected() {
 fn test_negative_amount_milestone_rejected() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let depositor = Address::generate(&env);
@@ -866,7 +883,7 @@ fn test_negative_amount_milestone_rejected() {
 fn test_self_dealing_rejected() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let same_party = Address::generate(&env);
@@ -901,7 +918,7 @@ fn test_self_dealing_rejected() {
 fn test_valid_escrow_creation_succeeds() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let depositor = Address::generate(&env);
@@ -950,7 +967,7 @@ fn test_double_deposit_rejected() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let depositor = Address::generate(&env);
@@ -993,7 +1010,7 @@ fn test_release_milestone_before_deposit() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(VaultixEscrow, ());
+    let contract_id = env.register_contract(None, VaultixEscrow);
     let client = VaultixEscrowClient::new(&env, &contract_id);
 
     let depositor = Address::generate(&env);

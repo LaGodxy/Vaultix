@@ -1,7 +1,8 @@
 #![no_std]
+#![allow(unexpected_cfgs)]
 use soroban_sdk::{
-    Address, Env, Symbol, Vec, contract, contracterror, contractimpl, contracttype, symbol_short,
-    token,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, Symbol,
+    Vec,
 };
 
 #[contracttype]
@@ -227,7 +228,7 @@ impl VaultixEscrow {
         // Create the escrow in Created state (not yet funded)
         let escrow = Escrow {
             depositor: depositor.clone(),
-            recipient,
+            recipient: recipient.clone(),
             token_address: token_address.clone(),
             total_amount,
             total_released: 0,
@@ -243,6 +244,12 @@ impl VaultixEscrow {
         env.storage()
             .persistent()
             .extend_ttl(&storage_key, 100, 2_000_000);
+
+        // Emit event
+        env.events().publish(
+            (symbol_short!("create"), escrow_id, depositor, recipient),
+            total_amount,
+        );
 
         Ok(())
     }
