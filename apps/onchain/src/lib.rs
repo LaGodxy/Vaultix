@@ -41,6 +41,13 @@ pub enum Resolution {
 }
 
 #[contracttype]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ContractState {
+    Active,
+    Paused,
+}
+
+#[contracttype]
 #[derive(Clone, Debug)]
 pub struct Escrow {
     pub depositor: Address,
@@ -79,6 +86,7 @@ pub enum Error {
     InvalidEscrowStatus = 20,
     AlreadyInDispute = 21,
     InvalidWinner = 22,
+    ContractPaused = 23,
 }
 
 // Platform fee configuration (in basis points: 1 bps = 0.01%)
@@ -169,6 +177,30 @@ impl VaultixEscrow {
         Ok((treasury, fee_bps))
     }
 
+    /// Sets the global paused state (admin only).
+    /// When paused, state-changing user operations are blocked.
+    /// Read-only functions remain accessible.
+    pub fn set_paused(env: Env, paused: bool) -> Result<(), Error> {
+        let treasury: Address = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("treasury"))
+            .ok_or(Error::TreasuryNotInitialized)?;
+        treasury.require_auth();
+
+        let state = if paused {
+            ContractState::Paused
+        } else {
+            ContractState::Active
+        };
+
+        env.storage()
+            .instance()
+            .set(&symbol_short!("state"), &state);
+
+        Ok(())
+    }
+
     /// Initializes the contract with an admin address responsible for dispute resolution.
     pub fn init(env: Env, admin: Address) -> Result<(), Error> {
         if env.storage().persistent().has(&admin_storage_key()) {
@@ -206,6 +238,8 @@ impl VaultixEscrow {
         deadline: u64,
     ) -> Result<(), Error> {
         depositor.require_auth();
+
+        ensure_not_paused(&env)?;
 
         if depositor == recipient {
             return Err(Error::SelfDealing);
@@ -267,6 +301,8 @@ impl VaultixEscrow {
     /// * `TokenTransferFailed` - If token transfer fails
     pub fn deposit_funds(env: Env, escrow_id: u64) -> Result<(), Error> {
         let storage_key = get_storage_key(escrow_id);
+
+        ensure_not_paused(&env)?;
 
         // Load escrow from storage
         let mut escrow: Escrow = env
@@ -344,6 +380,8 @@ impl VaultixEscrow {
     /// Releases a specific milestone payment to the recipient (depositor-driven path).
     pub fn release_milestone(env: Env, escrow_id: u64, milestone_index: u32) -> Result<(), Error> {
         let storage_key = get_storage_key(escrow_id);
+
+        ensure_not_paused(&env)?;
 
         let mut escrow: Escrow = env
             .storage()
@@ -436,6 +474,8 @@ impl VaultixEscrow {
     ) -> Result<(), Error> {
         let storage_key = get_storage_key(escrow_id);
 
+        ensure_not_paused(&env)?;
+
         let mut escrow: Escrow = env
             .storage()
             .persistent()
@@ -488,6 +528,8 @@ impl VaultixEscrow {
     /// Raises a dispute on an active escrow. Either party (depositor or recipient) may invoke this.
     pub fn raise_dispute(env: Env, escrow_id: u64, caller: Address) -> Result<(), Error> {
         let storage_key = get_storage_key(escrow_id);
+
+        ensure_not_paused(&env)?;
 
         let mut escrow: Escrow = env
             .storage()
@@ -612,6 +654,8 @@ impl VaultixEscrow {
     pub fn cancel_escrow(env: Env, escrow_id: u64) -> Result<(), Error> {
         let storage_key = get_storage_key(escrow_id);
 
+        ensure_not_paused(&env)?;
+
         let mut escrow: Escrow = env
             .storage()
             .persistent()
@@ -655,6 +699,8 @@ impl VaultixEscrow {
     pub fn complete_escrow(env: Env, escrow_id: u64) -> Result<(), Error> {
         let storage_key = get_storage_key(escrow_id);
 
+        ensure_not_paused(&env)?;
+
         let mut escrow: Escrow = env
             .storage()
             .persistent()
@@ -685,6 +731,20 @@ impl VaultixEscrow {
 
 fn get_storage_key(escrow_id: u64) -> (Symbol, u64) {
     (symbol_short!("escrow"), escrow_id)
+}
+
+fn ensure_not_paused(env: &Env) -> Result<(), Error> {
+    let state: ContractState = env
+        .storage()
+        .instance()
+        .get(&symbol_short!("state"))
+        .unwrap_or(ContractState::Active);
+
+    if state == ContractState::Paused {
+        return Err(Error::ContractPaused);
+    }
+
+    Ok(())
 }
 
 fn admin_storage_key() -> Symbol {
