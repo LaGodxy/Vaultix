@@ -8,7 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
 import { Escrow, EscrowStatus } from '../entities/escrow.entity';
 import { Party, PartyRole } from '../entities/party.entity';
-import { Condition, ConditionType } from '../entities/condition.entity';
+import { Condition } from '../entities/condition.entity';
 import { EscrowEvent, EscrowEventType } from '../entities/escrow-event.entity';
 import { CreateEscrowDto } from '../dto/create-escrow.dto';
 import { UpdateEscrowDto } from '../dto/update-escrow.dto';
